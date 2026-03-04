@@ -1,70 +1,590 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="he" dir="rtl">
 <head>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Green Route</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1" />
+  <title>🚦 Green Route (פרטי)</title>
 
-<style>
-body{
-font-family:Arial;
-background:#111;
-color:white;
-text-align:center;
-padding:40px;
-}
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-button{
-font-size:22px;
-padding:20px;
-margin:10px;
-border-radius:10px;
-border:none;
-background:#2ecc71;
-color:white;
-}
-</style>
+  <style>
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;background:#0b0f14;color:#e7eef7}
+    header{padding:12px;border-bottom:1px solid rgba(255,255,255,.08);background:#0b0f14;position:sticky;top:0;z-index:10}
+    h1{font-size:15px;margin:0 0 8px}
+    .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    button,input,select,textarea{
+      background:#121a24;color:#e7eef7;border:1px solid rgba(255,255,255,.12);
+      border-radius:12px;padding:10px 12px;font-size:14px
+    }
+    button{cursor:pointer}
+    button.primary{background:#1a2a3d;border-color:rgba(255,255,255,.18)}
+    button.danger{background:#2a1620;border-color:rgba(255,255,255,.18)}
+    button:disabled{opacity:.55;cursor:not-allowed}
+    #map{height:54vh}
+    .panel{padding:12px}
+    .card{background:#0f1620;border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:12px;margin:10px 0}
+    .muted{color:#9bb0c8;font-size:12px}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+    .pill{display:inline-block;padding:4px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.12);font-size:12px}
+    .list{display:flex;flex-direction:column;gap:8px}
+    .item{padding:10px;border-radius:14px;border:1px solid rgba(255,255,255,.08);background:#0c121a}
+    .itemTop{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}
+    .itemTitle{font-weight:800}
+    .routePick{border-color:rgba(120,200,255,.65)}
+    .mini{font-size:12px;padding:7px 10px;border-radius:10px}
+  </style>
 </head>
 
 <body>
+<header>
+  <h1>🚦 Green Route (פרטי) — מסלול “יותר ירוק” בעיר</h1>
+  <div class="row">
+    <button id="btnLocate" class="primary">📍 מצא אותי</button>
 
-<h1>🚦 Green Route</h1>
+    <select id="mode">
+      <option value="moto">🏍️ אופנוע</option>
+      <option value="car">🚗 אוטו</option>
+    </select>
 
-<p>שמירת רמזורים בעיר</p>
+    <button id="btnSetStart" class="mini">Start מה-GPS</button>
+    <button id="btnSetEnd" class="mini">End מה-GPS</button>
 
-<button onclick="saveLight()">שמור רמזור</button>
+    <button id="btnRoute" class="primary" disabled>🧭 חשב מסלול ירוק</button>
+    <button id="btnClearRoute" class="danger" disabled>🧹 נקה מסלול</button>
+  </div>
+  <div class="muted">
+    טיפ: לחץ על המפה כדי לבחור Start/End או להוסיף רמזור (לפי מצב הלחיצה).
+  </div>
+</header>
 
-<button onclick="showLights()">רמזורים שמורים</button>
+<div id="map"></div>
+
+<div class="panel">
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <div>
+        <div class="pill" id="tapModePill">מצב לחיצה: <b>Start</b></div>
+        <div class="muted">לחץ על המפה כדי להגדיר Start/End או להוסיף רמזור</div>
+      </div>
+      <div class="row">
+        <button id="tapStart" class="mini primary">🟢 מצב Start</button>
+        <button id="tapEnd" class="mini">🔴 מצב End</button>
+        <button id="tapLight" class="mini">➕ מצב רמזור</button>
+      </div>
+    </div>
+
+    <div class="grid" style="margin-top:10px">
+      <input id="name" placeholder="שם/צומת (לרמזור)" />
+      <select id="dir">
+        <option value="">כיוון/מסלול (אופציונלי)</option>
+        <option>ישר</option><option>ימינה</option><option>שמאלה</option><option>פרסה</option>
+      </select>
+    </div>
+    <div class="grid">
+      <input id="lat" class="mono" placeholder="Latitude" />
+      <input id="lng" class="mono" placeholder="Longitude" />
+    </div>
+
+    <div class="grid3">
+      <button id="btnStartRed">⏱️ התחל אדום</button>
+      <button id="btnStartGreen">⏱️ התחל ירוק</button>
+      <button id="btnStop" class="primary" disabled>✅ עצור ושמור</button>
+    </div>
+    <div class="muted" id="timerInfo">טיימר: לא פעיל</div>
+    <textarea id="note" rows="2" placeholder="הערות (אופציונלי)"></textarea>
+
+    <div class="row" style="justify-content:space-between;margin-top:10px">
+      <button id="btnAddLight" class="primary">➕ שמור רמזור (לפי Lat/Lng)</button>
+      <button id="btnExport">⬇️ Export</button>
+      <label class="pill">⬆️ Import <input id="importFile" type="file" accept="application/json" style="display:none"></label>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between;align-items:center">
+      <div>
+        <div style="font-weight:800">📋 הרמזורים שלי</div>
+        <div class="muted">בחר רמזור → תתמקד במפה. המדידות משפרות חיזוי.</div>
+      </div>
+      <button id="btnClearAll" class="danger">🧨 מחק הכל</button>
+    </div>
+    <div id="list" class="list"></div>
+  </div>
+
+  <div class="card">
+    <div style="font-weight:800;margin-bottom:6px">🧭 מסלולים</div>
+    <div class="muted">מביא חלופות ומדרג לפי “עצירות צפויות” מהרמזורים ששמרת.</div>
+    <div id="routes" class="list" style="margin-top:10px"></div>
+  </div>
+</div>
 
 <script>
+  const KEY = "tl_lights_v2";
+  const load = () => { try { return JSON.parse(localStorage.getItem(KEY) || "[]"); } catch { return []; } };
+  const save = (arr) => localStorage.setItem(KEY, JSON.stringify(arr));
 
-function saveLight(){
+  const map = L.map('map', { zoomControl: true }).setView([32.0853, 34.7818], 12);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
 
-navigator.geolocation.getCurrentPosition(function(pos){
+  const markers = new Map();
+  let myMarker = null;
 
-let lights = JSON.parse(localStorage.getItem("lights") || "[]")
+  const routeLayers = [];
+  let startMarker = null, endMarker = null;
+  let startPos = null, endPos = null;
 
-lights.push({
-lat:pos.coords.latitude,
-lng:pos.coords.longitude
-})
+  const el = (id) => document.getElementById(id);
+  const btnLocate = el("btnLocate");
+  const btnRoute = el("btnRoute");
+  const btnClearRoute = el("btnClearRoute");
+  const modeSel = el("mode");
 
-localStorage.setItem("lights",JSON.stringify(lights))
+  const tapModePill = el("tapModePill");
+  const tapStart = el("tapStart");
+  const tapEnd = el("tapEnd");
+  const tapLight = el("tapLight");
 
-alert("הרמזור נשמר")
+  const btnSetStart = el("btnSetStart");
+  const btnSetEnd = el("btnSetEnd");
 
-})
+  const nameIn = el("name");
+  const dirIn = el("dir");
+  const latIn = el("lat");
+  const lngIn = el("lng");
+  const noteIn = el("note");
+  const btnAddLight = el("btnAddLight");
 
-}
+  const btnStartRed = el("btnStartRed");
+  const btnStartGreen = el("btnStartGreen");
+  const btnStop = el("btnStop");
+  const timerInfo = el("timerInfo");
 
-function showLights(){
+  const list = el("list");
+  const routesBox = el("routes");
 
-let lights = JSON.parse(localStorage.getItem("lights") || "[]")
+  const btnExport = el("btnExport");
+  const importFile = el("importFile");
+  const btnClearAll = el("btnClearAll");
 
-alert("נשמרו "+lights.length+" רמזורים")
+  let timer = { running:false, phase:null, startedAt:0 };
+  function startTimer(phase){
+    if(!selectedId) return alert("בחר רמזור מהרשימה קודם.");
+    timer = { running:true, phase, startedAt: Date.now() };
+    btnStop.disabled = false;
+    timerInfo.textContent = `טיימר פעיל: ${phase === "red" ? "אדום" : "ירוק"} (התחיל עכשיו)`;
+  }
+  function stopTimer(){
+    if(!timer.running) return null;
+    const sec = Math.max(1, Math.round((Date.now() - timer.startedAt)/1000));
+    const phase = timer.phase;
+    timer = { running:false, phase:null, startedAt:0 };
+    btnStop.disabled = true;
+    timerInfo.textContent = `נשמר: ${phase} = ${sec}s`;
+    return { phase, sec, at: Date.now() };
+  }
 
-}
+  function upsertMarker(light){
+    const pos = [light.lat, light.lng];
+    const label = `${light.name || "רמזור"}${light.dir ? " · " + light.dir : ""}`;
+    if(markers.has(light.id)){
+      markers.get(light.id).setLatLng(pos).bindPopup(label);
+    } else {
+      const m = L.marker(pos).addTo(map).bindPopup(label);
+      m.on("click", () => selectLight(light.id));
+      markers.set(light.id, m);
+    }
+  }
+  function rebuildMarkers(){
+    for(const m of markers.values()) map.removeLayer(m);
+    markers.clear();
+    load().forEach(upsertMarker);
+  }
 
+  function addLightFromInputs(){
+    const name = nameIn.value.trim();
+    const dir = dirIn.value.trim();
+    const lat = parseFloat(latIn.value);
+    const lng = parseFloat(lngIn.value);
+    const note = noteIn.value.trim();
+    if(!Number.isFinite(lat) || !Number.isFinite(lng)) return alert("Latitude/Longitude לא תקינים.");
+
+    const lights = load();
+    const light = { id: Date.now(), name, dir, note, lat, lng, createdAt: Date.now(), obs: [] };
+    lights.unshift(light);
+    save(lights);
+    rebuildMarkers();
+    renderList();
+    selectLight(light.id);
+  }
+
+  function appendObservation(lightId, obs){
+    const lights = load();
+    const idx = lights.findIndex(l => l.id === lightId);
+    if(idx === -1) return;
+    lights[idx].obs = lights[idx].obs || [];
+    lights[idx].obs.push(obs);
+    save(lights);
+    renderList();
+  }
+
+  function deleteLight(id){
+    save(load().filter(l => l.id !== id));
+    if(selectedId === id) selectedId = null;
+    rebuildMarkers();
+    renderList();
+  }
+
+  function avgPhase(light, phase){
+    const obs = (light.obs || []).filter(o => o.phase === phase).slice(-10);
+    if(obs.length === 0) return null;
+    return obs.reduce((a,b)=>a+b.sec,0) / obs.length;
+  }
+
+  function hav(a,b){
+    const R = 6371000;
+    const toRad = x => x*Math.PI/180;
+    const dLat = toRad(b[0]-a[0]);
+    const dLon = toRad(b[1]-a[1]);
+    const s1 = Math.sin(dLat/2), s2 = Math.sin(dLon/2);
+    const aa = s1*s1 + Math.cos(toRad(a[0]))*Math.cos(toRad(b[0]))*s2*s2;
+    return 2*R*Math.asin(Math.min(1,Math.sqrt(aa)));
+  }
+
+  let selectedId = null;
+  function selectLight(id){
+    selectedId = id;
+    const light = load().find(l => l.id === id);
+    if(!light) return;
+    nameIn.value = light.name || "";
+    dirIn.value = light.dir || "";
+    latIn.value = light.lat;
+    lngIn.value = light.lng;
+    noteIn.value = light.note || "";
+    map.setView([light.lat, light.lng], 17);
+    markers.get(id)?.openPopup();
+    renderList();
+  }
+
+  function fmtTime(ts){
+    const d = new Date(ts);
+    return d.toLocaleString("he-IL", { hour:"2-digit", minute:"2-digit", day:"2-digit", month:"2-digit" });
+  }
+
+  function renderList(){
+    const lights = load();
+    list.innerHTML = "";
+    if(lights.length === 0){
+      list.innerHTML = `<div class="muted">אין עדיין רמזורים. לחץ 📍 מצא אותי → תן שם → שמור רמזור.</div>`;
+      return;
+    }
+    for(const l of lights){
+      const isSel = l.id === selectedId;
+      const rA = avgPhase(l,"red"), gA = avgPhase(l,"green");
+      const last = (l.obs || [])[l.obs?.length - 1];
+
+      const div = document.createElement("div");
+      div.className = "item";
+      div.style.borderColor = isSel ? "rgba(120,200,255,.65)" : "rgba(255,255,255,.08)";
+      div.innerHTML = `
+        <div class="itemTop">
+          <div>
+            <div class="itemTitle">${l.name || "רמזור"}</div>
+            <div class="muted">${l.dir ? `כיוון: ${l.dir} · ` : ""}${l.lat.toFixed(6)}, ${l.lng.toFixed(6)}</div>
+            <div class="muted">${last ? `אחרון: ${last.phase} ${last.sec}s · ${fmtTime(last.at)}` : "אין מדידות"}</div>
+            <div class="muted">ממוצע: אדום ${rA ? rA.toFixed(0)+'s' : '—'} · ירוק ${gA ? gA.toFixed(0)+'s' : '—'}</div>
+          </div>
+          <div class="row" style="gap:6px;justify-content:flex-end">
+            <button class="mini primary" data-act="go">📍</button>
+            <button class="mini danger" data-act="del">🗑️</button>
+          </div>
+        </div>
+      `;
+      div.addEventListener("click", (e)=>{
+        const act = e.target?.dataset?.act;
+        if(act === "del"){ e.stopPropagation(); deleteLight(l.id); return; }
+        if(act === "go"){ e.stopPropagation(); selectLight(l.id); return; }
+        selectLight(l.id);
+      });
+      list.appendChild(div);
+    }
+  }
+
+  let tapMode = "start";
+  function setTapMode(m){
+    tapMode = m;
+    tapModePill.innerHTML = `מצב לחיצה: <b>${m === "start" ? "Start" : m === "end" ? "End" : "רמזור"}</b>`;
+    tapStart.classList.toggle("primary", m==="start");
+    tapEnd.classList.toggle("primary", m==="end");
+    tapLight.classList.toggle("primary", m==="light");
+  }
+
+  function locateMe(){
+    btnLocate.disabled = true;
+    btnLocate.textContent = "מחפש GPS...";
+    navigator.geolocation.getCurrentPosition(
+      (pos)=>{
+        const lat = pos.coords.latitude, lng = pos.coords.longitude;
+        if(!myMarker) myMarker = L.circleMarker([lat,lng], { radius:8 }).addTo(map).bindPopup("אתה פה");
+        myMarker.setLatLng([lat,lng]);
+        map.setView([lat,lng], 17);
+        latIn.value = lat.toFixed(6);
+        lngIn.value = lng.toFixed(6);
+        btnLocate.disabled = false;
+        btnLocate.textContent = "📍 מצא אותי";
+      },
+      ()=>{
+        alert("לא הצלחתי לקבל מיקום. תוודא הרשאת מיקום.");
+        btnLocate.disabled = false;
+        btnLocate.textContent = "📍 מצא אותי";
+      },
+      { enableHighAccuracy:true, timeout:12000 }
+    );
+  }
+
+  function setStart(lat,lng){
+    startPos = [lat,lng];
+    if(!startMarker) startMarker = L.marker(startPos).addTo(map).bindPopup("Start");
+    startMarker.setLatLng(startPos);
+    startMarker.openPopup();
+    maybeEnableRoute();
+  }
+  function setEnd(lat,lng){
+    endPos = [lat,lng];
+    if(!endMarker) endMarker = L.marker(endPos).addTo(map).bindPopup("End");
+    endMarker.setLatLng(endPos);
+    endMarker.openPopup();
+    maybeEnableRoute();
+  }
+  function maybeEnableRoute(){
+    btnRoute.disabled = !(startPos && endPos);
+  }
+
+  async function fetchRoutes(start, end){
+    const s = `${start[1]},${start[0]}`;
+    const e = `${end[1]},${end[0]}`;
+    const url = `https://router.project-osrm.org/route/v1/driving/${s};${e}?alternatives=true&overview=full&geometries=geojson&steps=false`;
+    const r = await fetch(url);
+    if(!r.ok) throw new Error("routing failed");
+    const data = await r.json();
+    if(data.code !== "Ok") throw new Error("routing bad response");
+    return data.routes || [];
+  }
+
+  function clearRoute(){
+    while(routeLayers.length){
+      const lay = routeLayers.pop();
+      map.removeLayer(lay);
+    }
+    routesBox.innerHTML = "";
+    btnClearRoute.disabled = true;
+  }
+
+  function pointToLineDistanceMeters(p, line){
+    let best = Infinity;
+    for(const q of line){
+      const d = hav([p[0],p[1]],[q[1],q[0]]);
+      if(d < best) best = d;
+    }
+    return best;
+  }
+
+  function estimateStopsForRoute(route, lights, mode){
+    const coords = route.geometry.coordinates;
+    const lengthM = route.distance;
+    const durationS = route.duration;
+
+    const params = mode === "moto"
+      ? { speedFactor: 1.05, lightPenaltySec: 9, nearM: 35 }
+      : { speedFactor: 1.00, lightPenaltySec: 14, nearM: 45 };
+
+    const adjDurationS = durationS / params.speedFactor;
+
+    const near = [];
+    for(const l of lights){
+      const d = pointToLineDistanceMeters([l.lat,l.lng], coords);
+      if(d <= params.nearM) near.push(l);
+    }
+
+    let expectedStopSec = 0;
+    let countLights = 0;
+
+    for(const l of near){
+      countLights++;
+      const rA = avgPhase(l,"red");
+      const gA = avgPhase(l,"green");
+      if(rA && gA){
+        const cycle = rA + gA;
+        const expWait = (rA*rA) / (2*cycle);
+        expectedStopSec += expWait;
+      } else if(rA && !gA){
+        expectedStopSec += rA/2;
+      } else {
+        expectedStopSec += params.lightPenaltySec;
+      }
+    }
+
+    const score = adjDurationS + expectedStopSec + (lengthM/1000)*2;
+
+    return { score, countLights, expectedStopSec, adjDurationS, lengthM };
+  }
+
+  function drawRoute(route, isBest){
+    const line = L.geoJSON(route.geometry, { });
+    line.addTo(map);
+    routeLayers.push(line);
+    if(isBest) line.bringToFront();
+    return line;
+  }
+
+  function renderRoutes(routes, scored){
+    routesBox.innerHTML = "";
+    const bestIdx = scored.reduce((best,i,idx)=> i.score < best.score ? {score:i.score,idx} : best, {score:Infinity,idx:-1}).idx;
+
+    routes.forEach((r, idx)=>{
+      const s = scored[idx];
+      const div = document.createElement("div");
+      div.className = "item " + (idx === bestIdx ? "routePick" : "");
+      div.innerHTML = `
+        <div class="itemTop">
+          <div>
+            <div class="itemTitle">${idx === bestIdx ? "✅ מומלץ (יותר ירוק)" : "חלופה"}</div>
+            <div class="muted">
+              זמן נסיעה משוער: ${(s.adjDurationS/60).toFixed(1)} דק׳ ·
+              עצירות צפויות: ${(s.expectedStopSec/60).toFixed(1)} דק׳ ·
+              רמזורים על המסלול: ${s.countLights}
+            </div>
+            <div class="muted">מרחק: ${(s.lengthM/1000).toFixed(2)} ק״מ · ציון: ${s.score.toFixed(0)}</div>
+          </div>
+        </div>
+      `;
+      routesBox.appendChild(div);
+    });
+  }
+
+  async function computeGreenRoute(){
+    if(!(startPos && endPos)) return;
+    clearRoute();
+    routesBox.innerHTML = `<div class="muted">מחשב מסלולים…</div>`;
+    btnRoute.disabled = true;
+
+    try{
+      const routes = await fetchRoutes(startPos, endPos);
+      if(routes.length === 0) throw new Error("no routes");
+
+      const lights = load();
+      const mode = modeSel.value;
+      const scored = routes.map(r => estimateStopsForRoute(r, lights, mode));
+
+      let bestIdx = 0;
+      for(let i=1;i<scored.length;i++) if(scored[i].score < scored[bestIdx].score) bestIdx = i;
+
+      routes.forEach((r,idx)=>{ if(idx!==bestIdx) drawRoute(r,false); });
+      drawRoute(routes[bestIdx], true);
+
+      map.fitBounds(L.geoJSON(routes[bestIdx].geometry).getBounds(), { padding:[20,20] });
+
+      renderRoutes(routes, scored);
+      btnClearRoute.disabled = false;
+    }catch(e){
+      routesBox.innerHTML = `<div class="muted">לא הצלחתי לחשב מסלול (ייתכן שאין אינטרנט / בעיית שירות). נסה שוב.</div>`;
+    }finally{
+      btnRoute.disabled = !(startPos && endPos);
+    }
+  }
+
+  function exportJSON(){
+    const data = load();
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type:"application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `traffic-lights-${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+  function importJSON(file){
+    const fr = new FileReader();
+    fr.onload = () => {
+      try{
+        const data = JSON.parse(fr.result);
+        if(!Array.isArray(data)) throw new Error("bad format");
+        const cleaned = data.filter(x => x && Number.isFinite(x.lat) && Number.isFinite(x.lng) && x.id);
+        save(cleaned);
+        rebuildMarkers();
+        renderList();
+        alert("Import הצליח ✅");
+      }catch(e){
+        alert("Import נכשל.");
+      }
+    };
+    fr.readAsText(file);
+  }
+
+  btnLocate.addEventListener("click", locateMe);
+
+  tapStart.addEventListener("click", ()=>setTapMode("start"));
+  tapEnd.addEventListener("click", ()=>setTapMode("end"));
+  tapLight.addEventListener("click", ()=>setTapMode("light"));
+
+  btnSetStart.addEventListener("click", ()=>{
+    navigator.geolocation.getCurrentPosition(pos=>setStart(pos.coords.latitude,pos.coords.longitude));
+  });
+  btnSetEnd.addEventListener("click", ()=>{
+    navigator.geolocation.getCurrentPosition(pos=>setEnd(pos.coords.latitude,pos.coords.longitude));
+  });
+
+  btnAddLight.addEventListener("click", addLightFromInputs);
+
+  btnStartRed.addEventListener("click", ()=>startTimer("red"));
+  btnStartGreen.addEventListener("click", ()=>startTimer("green"));
+  btnStop.addEventListener("click", ()=>{
+    if(!selectedId) return;
+    const obs = stopTimer();
+    if(obs) appendObservation(selectedId, obs);
+  });
+
+  btnRoute.addEventListener("click", computeGreenRoute);
+  btnClearRoute.addEventListener("click", clearRoute);
+
+  btnExport.addEventListener("click", exportJSON);
+  importFile.addEventListener("change", (e)=>{
+    const f = e.target.files?.[0];
+    if(f) importJSON(f);
+    e.target.value = "";
+  });
+
+  btnClearAll.addEventListener("click", ()=>{
+    if(confirm("למחוק הכל?")){
+      localStorage.removeItem(KEY);
+      selectedId = null;
+      rebuildMarkers();
+      renderList();
+      clearRoute();
+    }
+  });
+
+  map.on("click", (e)=>{
+    const lat = e.latlng.lat;
+    const lng = e.latlng.lng;
+    latIn.value = lat.toFixed(6);
+    lngIn.value = lng.toFixed(6);
+
+    if(tapMode === "start"){
+      setStart(lat,lng);
+    }else if(tapMode === "end"){
+      setEnd(lat,lng);
+    }else{
+      // light mode: fill coords only, then user saves
+    }
+  });
+
+  setTapMode("start");
+  rebuildMarkers();
+  renderList();
+  maybeEnableRoute();
 </script>
-
 </body>
 </html>
