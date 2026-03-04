@@ -25,25 +25,28 @@
     button.primary{background:#1a2a3d}
     button.red{background:#2a1620}
     button.green{background:#12301f}
+    button.yellow{background:#2f2a12}
     button:disabled{opacity:.55;cursor:not-allowed}
     .row{display:flex;gap:8px;flex-wrap:wrap}
     .pill{display:inline-block;padding:6px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.12);font-size:12px}
     .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
     .list{display:flex;flex-direction:column;gap:8px;margin-top:10px}
     .item{padding:10px;border-radius:14px;border:1px solid rgba(255,255,255,.08);background:#0c121a}
-    .itemTop{display:flex;justify-content:space-between;gap:8px}
+    .itemTop{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}
     .small{font-size:12px;color:#9bb0c8}
     .danger{background:#2a1620}
-    textarea{width:100%;min-height:120px;background:#0c121a;color:#e7eef7;border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:10px;font-size:12px}
+    textarea{width:100%;min-height:140px;background:#0c121a;color:#e7eef7;border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:10px;font-size:12px}
+    details summary{cursor:pointer}
   </style>
 </head>
 <body>
 <header>
   <h1>🚦 איסוף נתוני רמזורים (פרטי)</h1>
-  <div class="muted">בלי שמות. רק לוחצים אדום → ירוק. הכל נשמר אוטומטי בטלפון.</div>
+  <div class="muted">בלי שמות. אותו רמזור מזוהה אוטומטית לפי מרחק.</div>
   <div class="row" style="margin-top:8px">
     <span class="pill">GPS: <span id="gpsStatus">לא פעיל</span></span>
     <span class="pill mono" id="gpsPos">—</span>
+    <span class="pill">Match: <span id="matchRadius">35m</span></span>
   </div>
 </header>
 
@@ -52,6 +55,7 @@
     <button id="btnEnable" class="primary">📍 הפעל מיקום (פעם אחת)</button>
 
     <button id="btnRed" class="red" disabled>🔴 אדום התחיל</button>
+    <button id="btnStillRed" class="yellow" disabled>🟡 עדיין אדום (צ׳קפוינט)</button>
     <button id="btnGreen" class="green" disabled>🟢 נהיה ירוק (סיום אדום)</button>
 
     <div class="muted" id="sessionInfo" style="margin-top:6px">מצב: מחכה</div>
@@ -60,33 +64,40 @@
   <div class="card">
     <div class="row" style="justify-content:space-between;align-items:center">
       <div>
-        <div style="font-weight:800">📊 רשומות (האחרונות)</div>
-        <div class="muted">כל רשומה = מיקום + משך אדום + זמן</div>
+        <div style="font-weight:800">📊 רמזורים שנאספו</div>
+        <div class="muted">כל רמזור = נקודה + היסטוריית מדידות</div>
       </div>
       <div class="row">
         <button id="btnExport" style="width:auto;padding:10px 12px;font-size:14px">⬇️ Export</button>
         <button id="btnClear" class="danger" style="width:auto;padding:10px 12px;font-size:14px">🗑️ מחק הכל</button>
       </div>
     </div>
+
     <div id="list" class="list"></div>
 
     <details style="margin-top:10px">
-      <summary class="muted">הצג JSON (לשליחה/גיבוי)</summary>
+      <summary class="muted">הצג JSON (לגיבוי/שליחה)</summary>
       <textarea id="jsonOut" readonly></textarea>
     </details>
   </div>
 </div>
 
 <script>
-  const KEY = "tl_logger_v1";
+  // ===== Storage model =====
+  // lights: [{ id, lat, lng, createdAt, lastSeenAt, stats:{n,avg}, samples:[...last 50] }]
+  // events: [{ id, lightId, createdAt, redStartAt, redStartFix, checkpoints:[...], greenAt, redSec, endFix }]
+  const KEY = "tl_logger_v2";
+  const MATCH_RADIUS_M = 35; // same-light detection radius
 
   const el = (id)=>document.getElementById(id);
   const gpsStatus = el("gpsStatus");
   const gpsPos = el("gpsPos");
+  const matchRadius = el("matchRadius");
   const sessionInfo = el("sessionInfo");
 
   const btnEnable = el("btnEnable");
   const btnRed = el("btnRed");
+  const btnStillRed = el("btnStillRed");
   const btnGreen = el("btnGreen");
 
   const btnExport = el("btnExport");
@@ -94,48 +105,44 @@
   const list = el("list");
   const jsonOut = el("jsonOut");
 
+  matchRadius.textContent = MATCH_RADIUS_M + "m";
+
   let watchId = null;
   let lastFix = null; // {lat,lng,acc,speed,heading,ts}
 
-  let redStartAt = null; // ms
-  let redStartFix = null;
+  // current in-progress event
+  let current = null; // { eventId, lightId, redStartAt, redStartFix, checkpoints:[] }
 
   function load(){
-    try { return JSON.parse(localStorage.getItem(KEY) || "[]"); }
-    catch { return []; }
+    try {
+      const raw = JSON.parse(localStorage.getItem(KEY) || "{}");
+      return {
+        lights: Array.isArray(raw.lights) ? raw.lights : [],
+        events: Array.isArray(raw.events) ? raw.events : []
+      };
+    } catch {
+      return { lights: [], events: [] };
+    }
   }
-  function save(arr){
-    localStorage.setItem(KEY, JSON.stringify(arr));
+  function save(data){
+    localStorage.setItem(KEY, JSON.stringify(data));
   }
 
   function fmt(ts){
-    return new Date(ts).toLocaleString("he-IL", { year:"2-digit", month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit", second:"2-digit" });
+    return new Date(ts).toLocaleString("he-IL", {
+      year:"2-digit", month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit", second:"2-digit"
+    });
   }
 
-  function render(){
-    const rows = load();
-    list.innerHTML = "";
-    jsonOut.value = JSON.stringify(rows, null, 2);
-
-    if(rows.length === 0){
-      list.innerHTML = `<div class="muted">אין עדיין נתונים. לחץ "הפעל מיקום" ואז ברמזור: אדום → ירוק.</div>`;
-      return;
-    }
-
-    rows.slice(0, 20).forEach((r)=>{
-      const div = document.createElement("div");
-      div.className = "item";
-      div.innerHTML = `
-        <div class="itemTop">
-          <div>
-            <div><b>${fmt(r.createdAt)}</b></div>
-            <div class="small">אדום: <span class="mono">${r.redSec}s</span> · דיוק: <span class="mono">${Math.round(r.accuracy||0)}m</span></div>
-            <div class="small mono">${r.lat.toFixed(6)}, ${r.lng.toFixed(6)}</div>
-          </div>
-        </div>
-      `;
-      list.appendChild(div);
-    });
+  // Haversine distance in meters
+  function distM(aLat,aLng,bLat,bLng){
+    const R = 6371000;
+    const toRad = x => x*Math.PI/180;
+    const dLat = toRad(bLat-aLat);
+    const dLon = toRad(bLng-aLng);
+    const s1 = Math.sin(dLat/2), s2 = Math.sin(dLon/2);
+    const aa = s1*s1 + Math.cos(toRad(aLat))*Math.cos(toRad(bLat))*s2*s2;
+    return 2*R*Math.asin(Math.min(1,Math.sqrt(aa)));
   }
 
   function updateGpsUI(){
@@ -145,7 +152,15 @@
       return;
     }
     gpsStatus.textContent = "פעיל";
-    gpsPos.textContent = `${lastFix.lat.toFixed(6)}, ${lastFix.lng.toFixed(6)} · ±${Math.round(lastFix.acc)}m`;
+    gpsPos.textContent = `${lastFix.lat.toFixed(6)}, ${lastFix.lng.toFixed(6)} · ±${Math.round(lastFix.acc||0)}m`;
+  }
+
+  function enableButtonsOnFix(){
+    btnRed.disabled = false;
+    btnStillRed.disabled = true;
+    btnGreen.disabled = true;
+    btnEnable.disabled = true;
+    btnEnable.textContent = "✅ מיקום פעיל";
   }
 
   function enableGps(){
@@ -166,14 +181,9 @@
           ts: pos.timestamp || Date.now()
         };
         updateGpsUI();
-
-        // מאפשרים כפתורים ברגע שיש fix ראשון
-        btnRed.disabled = false;
-        btnGreen.disabled = true;
-        btnEnable.disabled = true;
-        btnEnable.textContent = "✅ מיקום פעיל";
+        enableButtonsOnFix();
       },
-      (err)=>{
+      ()=>{
         gpsStatus.textContent = "חסום/שגיאה";
         alert("לא הצלחתי לקבל מיקום. תן הרשאת מיקום ל-Chrome והפעל GPS.");
       },
@@ -181,49 +191,123 @@
     );
   }
 
+  function getOrCreateLight(fix){
+    const db = load();
+    let best = null;
+    let bestD = Infinity;
+
+    for(const l of db.lights){
+      const d = distM(fix.lat,fix.lng,l.lat,l.lng);
+      if(d < bestD){
+        bestD = d;
+        best = l;
+      }
+    }
+
+    if(best && bestD <= MATCH_RADIUS_M){
+      best.lastSeenAt = Date.now();
+      save(db);
+      return { light: best, db };
+    }
+
+    const newLight = {
+      id: Date.now(),
+      lat: fix.lat,
+      lng: fix.lng,
+      createdAt: Date.now(),
+      lastSeenAt: Date.now(),
+      stats: { n: 0, avgRedSec: null },
+      samples: [] // keep last 50 red samples
+    };
+    db.lights.unshift(newLight);
+    save(db);
+    return { light: newLight, db };
+  }
+
   function startRed(){
-    if(!lastFix) return alert("חכה שהמיקום יתעדכן (GPS).");
-    redStartAt = Date.now();
-    redStartFix = {...lastFix};
-    sessionInfo.textContent = "מצב: 🔴 אדום התחיל… כשתהיה ירוק לחץ ירוק";
+    if(!lastFix) return alert("חכה ל-GPS.");
+    const { light } = getOrCreateLight(lastFix);
+
+    current = {
+      eventId: Date.now(),
+      lightId: light.id,
+      redStartAt: Date.now(),
+      redStartFix: { ...lastFix },
+      checkpoints: []
+    };
+
+    sessionInfo.textContent = "מצב: 🔴 אדום התחיל…";
     btnRed.disabled = true;
+    btnStillRed.disabled = false;
     btnGreen.disabled = false;
+
+    if(navigator.vibrate) navigator.vibrate(30);
+    render();
+  }
+
+  function stillRed(){
+    if(!current) return;
+    if(!lastFix) return;
+
+    current.checkpoints.push({
+      at: Date.now(),
+      fix: { ...lastFix }
+    });
+
+    const secs = Math.max(1, Math.round((Date.now() - current.redStartAt)/1000));
+    sessionInfo.textContent = `מצב: 🔴 עדיין אדום… (${secs}s) נשמר צ׳קפוינט ✅`;
+    if(navigator.vibrate) navigator.vibrate([20,40,20]);
+    render();
   }
 
   function greenNow(){
-    if(redStartAt == null) return;
-    if(!lastFix) return alert("אין מיקום עדכני. נסה שוב.");
+    if(!current) return;
+    if(!lastFix) return alert("אין מיקום עדכני.");
 
-    const redSec = Math.max(1, Math.round((Date.now() - redStartAt)/1000));
+    const redSec = Math.max(1, Math.round((Date.now() - current.redStartAt)/1000));
+    const endFix = { ...lastFix };
 
-    const record = {
+    const db = load();
+    const light = db.lights.find(l => l.id === current.lightId);
+
+    const ev = {
+      id: current.eventId,
+      lightId: current.lightId,
       createdAt: Date.now(),
+      redStartAt: current.redStartAt,
+      redStartFix: current.redStartFix,
+      checkpoints: current.checkpoints,
+      greenAt: Date.now(),
       redSec,
-      lat: lastFix.lat,
-      lng: lastFix.lng,
-      accuracy: lastFix.acc,
-      speed: lastFix.speed,
-      heading: lastFix.heading,
-      // שומרים גם את נקודת התחלת האדום (אם תרצה בעתיד)
-      redStart: {
-        at: redStartAt,
-        lat: redStartFix.lat,
-        lng: redStartFix.lng,
-        accuracy: redStartFix.acc
-      }
+      endFix
     };
+    db.events.unshift(ev);
 
-    const rows = load();
-    rows.unshift(record);
-    save(rows);
+    // update light stats
+    if(light){
+      light.lastSeenAt = Date.now();
+      light.stats = light.stats || { n: 0, avgRedSec: null };
+      const n = (light.stats.n || 0) + 1;
+      const prevAvg = Number.isFinite(light.stats.avgRedSec) ? light.stats.avgRedSec : null;
+      const avg = prevAvg == null ? redSec : (prevAvg*(n-1) + redSec)/n;
+      light.stats.n = n;
+      light.stats.avgRedSec = avg;
 
-    // איפוס מצב
-    redStartAt = null;
-    redStartFix = null;
-    sessionInfo.textContent = `נשמר ✅ אדום ${redSec}s`;
+      light.samples = Array.isArray(light.samples) ? light.samples : [];
+      light.samples.unshift({ at: ev.createdAt, redSec, acc: endFix.acc });
+      light.samples = light.samples.slice(0, 50);
+    }
+
+    save(db);
+
+    // reset UI
+    current = null;
+    sessionInfo.textContent = `נשמר ✅ אדום ${redSec}s (שויך לרמזור אוטומטית)`;
     btnRed.disabled = false;
+    btnStillRed.disabled = true;
     btnGreen.disabled = true;
 
+    if(navigator.vibrate) navigator.vibrate([50,60,50]);
     render();
   }
 
@@ -233,23 +317,66 @@
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `traffic-lights-logs-${Date.now()}.json`;
+    a.download = `traffic-lights-logger-${Date.now()}.json`;
     a.click();
     URL.revokeObjectURL(url);
   }
 
+  function render(){
+    const db = load();
+    jsonOut.value = JSON.stringify({
+      meta: { matchRadiusM: MATCH_RADIUS_M, exportedAt: Date.now() },
+      ...db
+    }, null, 2);
+
+    list.innerHTML = "";
+    if(db.lights.length === 0){
+      list.innerHTML = `<div class="muted">אין עדיין רמזורים. הפעל מיקום ואז לחץ 🔴 ברמזור.</div>`;
+      return;
+    }
+
+    // show last 20 lights, sorted by lastSeenAt desc
+    const lights = [...db.lights].sort((a,b)=>(b.lastSeenAt||0)-(a.lastSeenAt||0)).slice(0,20);
+
+    for(const l of lights){
+      const n = l.stats?.n || 0;
+      const avg = Number.isFinite(l.stats?.avgRedSec) ? l.stats.avgRedSec : null;
+
+      const div = document.createElement("div");
+      div.className = "item";
+      div.innerHTML = `
+        <div class="itemTop">
+          <div>
+            <div><b>רמזור #${l.id}</b></div>
+            <div class="small mono">${l.lat.toFixed(6)}, ${l.lng.toFixed(6)}</div>
+            <div class="small">מדידות: <span class="mono">${n}</span> · ממוצע אדום: <span class="mono">${avg ? avg.toFixed(0)+'s' : '—'}</span></div>
+            <div class="small">נראה לאחרונה: ${l.lastSeenAt ? fmt(l.lastSeenAt) : '—'}</div>
+          </div>
+        </div>
+      `;
+      list.appendChild(div);
+    }
+  }
+
   btnEnable.addEventListener("click", enableGps);
   btnRed.addEventListener("click", startRed);
+  btnStillRed.addEventListener("click", stillRed);
   btnGreen.addEventListener("click", greenNow);
 
   btnExport.addEventListener("click", exportJSON);
   btnClear.addEventListener("click", ()=>{
     if(confirm("למחוק את כל הנתונים שנאספו?")){
       localStorage.removeItem(KEY);
+      current = null;
+      btnRed.disabled = !lastFix;
+      btnStillRed.disabled = true;
+      btnGreen.disabled = true;
+      sessionInfo.textContent = "מצב: מחכה";
       render();
     }
   });
 
+  // Boot
   render();
   updateGpsUI();
 </script>
