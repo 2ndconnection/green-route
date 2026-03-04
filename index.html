@@ -42,11 +42,14 @@
 <body>
 <header>
   <h1>🚦 איסוף נתוני רמזורים (פרטי)</h1>
-  <div class="muted">בלי שמות. אותו רמזור מזוהה אוטומטית לפי מרחק.</div>
+  <div class="muted">
+    לחיצה אחת על 🔴 אדום. שמירה אוטומטית כשאתה מתחיל לזוז מעל 7 קמ״ש.
+  </div>
   <div class="row" style="margin-top:8px">
     <span class="pill">GPS: <span id="gpsStatus">לא פעיל</span></span>
     <span class="pill mono" id="gpsPos">—</span>
     <span class="pill">Match: <span id="matchRadius">35m</span></span>
+    <span class="pill">AutoSave: <span id="autoSpeed">7 km/h</span></span>
   </div>
 </header>
 
@@ -56,7 +59,8 @@
 
     <button id="btnRed" class="red" disabled>🔴 אדום התחיל</button>
     <button id="btnStillRed" class="yellow" disabled>🟡 עדיין אדום (צ׳קפוינט)</button>
-    <button id="btnGreen" class="green" disabled>🟢 נהיה ירוק (סיום אדום)</button>
+
+    <button id="btnGreen" class="green" disabled>🟢 נהיה ירוק (סיום ידני)</button>
 
     <div class="muted" id="sessionInfo" style="margin-top:6px">מצב: מחכה</div>
   </div>
@@ -83,16 +87,23 @@
 </div>
 
 <script>
-  // ===== Storage model =====
-  // lights: [{ id, lat, lng, createdAt, lastSeenAt, stats:{n,avg}, samples:[...last 50] }]
-  // events: [{ id, lightId, createdAt, redStartAt, redStartFix, checkpoints:[...], greenAt, redSec, endFix }]
-  const KEY = "tl_logger_v2";
-  const MATCH_RADIUS_M = 35; // same-light detection radius
+  // ===== Config =====
+  const KEY = "tl_logger_v3";
+  const MATCH_RADIUS_M = 35;
 
+  // Auto-save when moving > 7 km/h for ~2 seconds
+  const AUTO_SPEED_KMH = 7;
+  const AUTO_SPEED_MPS = AUTO_SPEED_KMH / 3.6;
+  const AUTO_CONFIRM_MS = 2000;        // must stay above threshold for 2s
+  const MIN_EVENT_SEC = 4;             // ignore super short events
+  const MAX_EVENT_SEC = 240;           // optional: label if very long
+
+  // ===== UI =====
   const el = (id)=>document.getElementById(id);
   const gpsStatus = el("gpsStatus");
   const gpsPos = el("gpsPos");
   const matchRadius = el("matchRadius");
+  const autoSpeed = el("autoSpeed");
   const sessionInfo = el("sessionInfo");
 
   const btnEnable = el("btnEnable");
@@ -106,13 +117,19 @@
   const jsonOut = el("jsonOut");
 
   matchRadius.textContent = MATCH_RADIUS_M + "m";
+  autoSpeed.textContent = AUTO_SPEED_KMH + " km/h";
 
+  // ===== State =====
   let watchId = null;
-  let lastFix = null; // {lat,lng,acc,speed,heading,ts}
+  let lastFix = null; // {lat,lng,acc,speedMps,heading,ts}
 
-  // current in-progress event
-  let current = null; // { eventId, lightId, redStartAt, redStartFix, checkpoints:[] }
+  // current event
+  // { eventId, lightId, redStartAt, redStartFix, checkpoints:[], autoMoveAboveSince:null }
+  let current = null;
 
+  // ===== Storage model =====
+  // lights: [{ id, lat, lng, createdAt, lastSeenAt, stats:{n,avgRedSec}, samples:[{at,redSec,acc}] }]
+  // events: [{ id, lightId, createdAt, redStartAt, redStartFix, checkpoints, endAt, redSec, endFix, endedBy }]
   function load(){
     try {
       const raw = JSON.parse(localStorage.getItem(KEY) || "{}");
@@ -145,6 +162,8 @@
     return 2*R*Math.asin(Math.min(1,Math.sqrt(aa)));
   }
 
+  function vibrate(p){ try { if(navigator.vibrate) navigator.vibrate(p); } catch {} }
+
   function updateGpsUI(){
     if(!lastFix){
       gpsStatus.textContent = "לא פעיל";
@@ -152,15 +171,20 @@
       return;
     }
     gpsStatus.textContent = "פעיל";
-    gpsPos.textContent = `${lastFix.lat.toFixed(6)}, ${lastFix.lng.toFixed(6)} · ±${Math.round(lastFix.acc||0)}m`;
+    const kmh = lastFix.speedMps == null ? "—" : Math.round(lastFix.speedMps*3.6);
+    gpsPos.textContent = `${lastFix.lat.toFixed(6)}, ${lastFix.lng.toFixed(6)} · ±${Math.round(lastFix.acc||0)}m · ${kmh}km/h`;
   }
 
-  function enableButtonsOnFix(){
-    btnRed.disabled = false;
+  function setIdleButtons(){
+    btnRed.disabled = !lastFix;
     btnStillRed.disabled = true;
     btnGreen.disabled = true;
-    btnEnable.disabled = true;
-    btnEnable.textContent = "✅ מיקום פעיל";
+  }
+
+  function setActiveButtons(){
+    btnRed.disabled = true;
+    btnStillRed.disabled = false;
+    btnGreen.disabled = false; // backup manual end
   }
 
   function enableGps(){
@@ -176,18 +200,28 @@
           lat: pos.coords.latitude,
           lng: pos.coords.longitude,
           acc: pos.coords.accuracy || null,
-          speed: Number.isFinite(pos.coords.speed) ? pos.coords.speed : null,
+          speedMps: Number.isFinite(pos.coords.speed) ? pos.coords.speed : null,
           heading: Number.isFinite(pos.coords.heading) ? pos.coords.heading : null,
           ts: pos.timestamp || Date.now()
         };
         updateGpsUI();
-        enableButtonsOnFix();
+
+        // IMPORTANT FIX: don't reset buttons while an event is active
+        if(!current){
+          btnEnable.disabled = true;
+          btnEnable.textContent = "✅ מיקום פעיל";
+          setIdleButtons();
+        } else {
+          // while active, keep active buttons + check auto-finish
+          setActiveButtons();
+          maybeAutoFinishBySpeed();
+        }
       },
       ()=>{
         gpsStatus.textContent = "חסום/שגיאה";
         alert("לא הצלחתי לקבל מיקום. תן הרשאת מיקום ל-Chrome והפעל GPS.");
       },
-      { enableHighAccuracy:true, maximumAge: 1500, timeout: 12000 }
+      { enableHighAccuracy:true, maximumAge: 1200, timeout: 12000 }
     );
   }
 
@@ -217,7 +251,7 @@
       createdAt: Date.now(),
       lastSeenAt: Date.now(),
       stats: { n: 0, avgRedSec: null },
-      samples: [] // keep last 50 red samples
+      samples: []
     };
     db.lights.unshift(newLight);
     save(db);
@@ -233,15 +267,13 @@
       lightId: light.id,
       redStartAt: Date.now(),
       redStartFix: { ...lastFix },
-      checkpoints: []
+      checkpoints: [],
+      autoMoveAboveSince: null
     };
 
-    sessionInfo.textContent = "מצב: 🔴 אדום התחיל…";
-    btnRed.disabled = true;
-    btnStillRed.disabled = false;
-    btnGreen.disabled = false;
-
-    if(navigator.vibrate) navigator.vibrate(30);
+    sessionInfo.textContent = "מצב: 🔴 אדום התחיל… (AutoSave כשאתה זז מעל 7 קמ״ש)";
+    setActiveButtons();
+    vibrate(40);
     render();
   }
 
@@ -256,36 +288,49 @@
 
     const secs = Math.max(1, Math.round((Date.now() - current.redStartAt)/1000));
     sessionInfo.textContent = `מצב: 🔴 עדיין אדום… (${secs}s) נשמר צ׳קפוינט ✅`;
-    if(navigator.vibrate) navigator.vibrate([20,40,20]);
+    vibrate([20,40,20]);
     render();
   }
 
-  function greenNow(){
+  function finishEvent(endedBy){
     if(!current) return;
     if(!lastFix) return alert("אין מיקום עדכני.");
 
-    const redSec = Math.max(1, Math.round((Date.now() - current.redStartAt)/1000));
-    const endFix = { ...lastFix };
+    const endAt = Date.now();
+    const redSec = Math.max(1, Math.round((endAt - current.redStartAt)/1000));
+    if(redSec < MIN_EVENT_SEC){
+      // too short - discard
+      current = null;
+      sessionInfo.textContent = "בוטל (קצר מדי)";
+      setIdleButtons();
+      render();
+      return;
+    }
 
+    const endFix = { ...lastFix };
     const db = load();
     const light = db.lights.find(l => l.id === current.lightId);
 
     const ev = {
       id: current.eventId,
       lightId: current.lightId,
-      createdAt: Date.now(),
+      createdAt: endAt,
       redStartAt: current.redStartAt,
       redStartFix: current.redStartFix,
       checkpoints: current.checkpoints,
-      greenAt: Date.now(),
+      endAt,
       redSec,
-      endFix
+      endFix,
+      endedBy, // "auto_speed" | "manual_green"
+      flags: {
+        veryLong: redSec > MAX_EVENT_SEC
+      }
     };
     db.events.unshift(ev);
 
     // update light stats
     if(light){
-      light.lastSeenAt = Date.now();
+      light.lastSeenAt = endAt;
       light.stats = light.stats || { n: 0, avgRedSec: null };
       const n = (light.stats.n || 0) + 1;
       const prevAvg = Number.isFinite(light.stats.avgRedSec) ? light.stats.avgRedSec : null;
@@ -294,26 +339,58 @@
       light.stats.avgRedSec = avg;
 
       light.samples = Array.isArray(light.samples) ? light.samples : [];
-      light.samples.unshift({ at: ev.createdAt, redSec, acc: endFix.acc });
+      light.samples.unshift({ at: ev.createdAt, redSec, acc: endFix.acc, endedBy });
       light.samples = light.samples.slice(0, 50);
     }
 
     save(db);
 
-    // reset UI
     current = null;
-    sessionInfo.textContent = `נשמר ✅ אדום ${redSec}s (שויך לרמזור אוטומטית)`;
-    btnRed.disabled = false;
-    btnStillRed.disabled = true;
-    btnGreen.disabled = true;
-
-    if(navigator.vibrate) navigator.vibrate([50,60,50]);
+    sessionInfo.textContent = `נשמר ✅ זמן עמידה ${redSec}s (${endedBy === "auto_speed" ? "Auto" : "ידני"})`;
+    setIdleButtons();
+    vibrate([60,60,60]);
     render();
+  }
+
+  function manualGreen(){
+    // optional backup
+    finishEvent("manual_green");
+  }
+
+  function maybeAutoFinishBySpeed(){
+    if(!current || !lastFix) return;
+    // if we don't have speed from GPS, we cannot auto-finish reliably
+    if(lastFix.speedMps == null) return;
+
+    const now = Date.now();
+    const above = lastFix.speedMps >= AUTO_SPEED_MPS;
+
+    if(above){
+      if(current.autoMoveAboveSince == null){
+        current.autoMoveAboveSince = now;
+      } else {
+        const ms = now - current.autoMoveAboveSince;
+        if(ms >= AUTO_CONFIRM_MS){
+          finishEvent("auto_speed");
+        }
+      }
+    } else {
+      current.autoMoveAboveSince = null;
+    }
   }
 
   function exportJSON(){
     const data = load();
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type:"application/json" });
+    const payload = {
+      meta: {
+        matchRadiusM: MATCH_RADIUS_M,
+        autoSpeedKmh: AUTO_SPEED_KMH,
+        autoConfirmMs: AUTO_CONFIRM_MS,
+        exportedAt: Date.now()
+      },
+      ...data
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type:"application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -325,7 +402,8 @@
   function render(){
     const db = load();
     jsonOut.value = JSON.stringify({
-      meta: { matchRadiusM: MATCH_RADIUS_M, exportedAt: Date.now() },
+      meta: { matchRadiusM: MATCH_RADIUS_M, autoSpeedKmh: AUTO_SPEED_KMH, autoConfirmMs: AUTO_CONFIRM_MS, exportedAt: Date.now() },
+      current,
       ...db
     }, null, 2);
 
@@ -335,9 +413,7 @@
       return;
     }
 
-    // show last 20 lights, sorted by lastSeenAt desc
     const lights = [...db.lights].sort((a,b)=>(b.lastSeenAt||0)-(a.lastSeenAt||0)).slice(0,20);
-
     for(const l of lights){
       const n = l.stats?.n || 0;
       const avg = Number.isFinite(l.stats?.avgRedSec) ? l.stats.avgRedSec : null;
@@ -349,7 +425,7 @@
           <div>
             <div><b>רמזור #${l.id}</b></div>
             <div class="small mono">${l.lat.toFixed(6)}, ${l.lng.toFixed(6)}</div>
-            <div class="small">מדידות: <span class="mono">${n}</span> · ממוצע אדום: <span class="mono">${avg ? avg.toFixed(0)+'s' : '—'}</span></div>
+            <div class="small">מדידות: <span class="mono">${n}</span> · ממוצע עמידה: <span class="mono">${avg ? avg.toFixed(0)+'s' : '—'}</span></div>
             <div class="small">נראה לאחרונה: ${l.lastSeenAt ? fmt(l.lastSeenAt) : '—'}</div>
           </div>
         </div>
@@ -358,27 +434,28 @@
     }
   }
 
+  // ===== Wire events =====
   btnEnable.addEventListener("click", enableGps);
   btnRed.addEventListener("click", startRed);
   btnStillRed.addEventListener("click", stillRed);
-  btnGreen.addEventListener("click", greenNow);
+  btnGreen.addEventListener("click", manualGreen);
 
   btnExport.addEventListener("click", exportJSON);
   btnClear.addEventListener("click", ()=>{
     if(confirm("למחוק את כל הנתונים שנאספו?")){
       localStorage.removeItem(KEY);
       current = null;
-      btnRed.disabled = !lastFix;
-      btnStillRed.disabled = true;
-      btnGreen.disabled = true;
       sessionInfo.textContent = "מצב: מחכה";
       render();
+      updateGpsUI();
+      setIdleButtons();
     }
   });
 
   // Boot
   render();
   updateGpsUI();
+  setIdleButtons();
 </script>
 </body>
 </html>
