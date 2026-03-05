@@ -3,538 +3,552 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1" />
-  <title>Green Route – מדידת רמזורים</title>
+  <title>GreenRoute — Auto Traffic Lights</title>
   <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; margin: 0; background: #0b0f14; color: #e8eef6; }
-    .wrap { max-width: 680px; margin: 0 auto; padding: 16px; }
-    .card { background: #121a24; border: 1px solid #1f2b3a; border-radius: 16px; padding: 14px; margin-bottom: 12px; }
-    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-    .btn {
-      border: 0; border-radius: 14px; padding: 14px 16px; font-size: 18px; font-weight: 700;
-      background: #2a3b52; color: #e8eef6;
-    }
-    .btn:active { transform: scale(0.99); }
-    .btn-primary { background: #1c7c3a; }
-    .btn-danger { background: #a33232; }
-    .btn-ghost { background: transparent; border: 1px solid #2a3b52; }
-    .big { width: 100%; padding: 18px 16px; font-size: 20px; border-radius: 16px; }
-    .muted { color: #a9b6c6; font-size: 13px; line-height: 1.4; }
-    .kv { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-    .kv > div { background: #0f1620; border: 1px solid #1f2b3a; border-radius: 12px; padding: 10px; }
-    .k { color: #a9b6c6; font-size: 12px; }
-    .v { font-size: 16px; font-weight: 700; margin-top: 4px; }
-    .log { white-space: pre-wrap; background: #0f1620; border: 1px solid #1f2b3a; border-radius: 12px; padding: 10px; font-size: 12px; color: #cfe0f5; max-height: 200px; overflow: auto; }
-    .pill { display: inline-block; padding: 4px 10px; border-radius: 999px; background: #0f1620; border: 1px solid #1f2b3a; color: #a9b6c6; font-size: 12px; }
-    a { color: #7bb7ff; }
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;background:#0b0f14;color:#e7eef7}
+    header{padding:14px;border-bottom:1px solid rgba(255,255,255,.08);position:sticky;top:0;background:#0b0f14;z-index:10}
+    h1{font-size:16px;margin:0 0 6px}
+    .muted{color:#9bb0c8;font-size:12px;line-height:1.35}
+    .wrap{padding:14px;max-width:720px;margin:0 auto}
+    .card{background:#0f1620;border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:12px;margin:10px 0}
+    .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:space-between}
+    .pill{display:inline-block;padding:6px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.12);font-size:12px}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+    button{border:1px solid rgba(255,255,255,.14);background:#1a2a3d;color:#e7eef7;cursor:pointer;border-radius:14px}
+    button.big{width:100%;font-size:22px;padding:18px 14px}
+    button.small{font-size:14px;padding:10px 12px;background:#121a24}
+    button.active{background:#1d5c2f}
+    button.stop{background:#5c1d1d}
+    button:disabled{opacity:.55;cursor:not-allowed}
+    .bigNum{font-size:34px;font-weight:900;text-align:center;margin:10px 0}
+    .list{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+    .item{padding:10px;border-radius:14px;border:1px solid rgba(255,255,255,.08);background:#0c121a}
+    textarea{width:100%;min-height:140px;background:#0c121a;color:#e7eef7;border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:10px;font-size:12px}
+    details summary{cursor:pointer}
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="card">
-      <h2 style="margin:0 0 6px 0;">Green Route – מדידת זמן רמזור</h2>
-      <div class="muted">
-        כפתור אחד: מגיע לרמזור → לוחץ “התחל מדידה”.<br>
-        ברגע שאתה נוסע מעל <b>10 קמ״ש</b> (יציב ~2 שניות) → נשמר אוטומטית.
-      </div>
-    </div>
+<header>
+  <h1>🚦 GreenRoute — Auto (רמזורים אדום+ירוק)</h1>
+  <div class="muted">
+    מצב אוטומטי: מזהה רמזורים לפי <b>GPS</b> ומאגר OSM, ושומר אירועים:
+    <b>STOP</b> (עצרת) + זמן המתנה, ו-<b>PASS</b> (עברתי בלי עצירה = ירוק).<br/>
+    מפעילים פעם אחת בתחילת היום: <b>Start Auto</b>.
+  </div>
+  <div class="row" style="margin-top:8px">
+    <span class="pill">GPS: <span id="gpsStatus">לא פעיל</span></span>
+    <span class="pill mono" id="gpsPos">—</span>
+    <span class="pill">Approach: <b>80m</b></span>
+    <span class="pill">Stop: <b>&lt;2 km/h</b></span>
+  </div>
+</header>
 
-    <div class="card">
-      <button id="mainBtn" class="btn btn-primary big">התחל מדידה</button>
-      <div style="margin-top:10px" class="row">
-        <span id="statusPill" class="pill">מצב: מוכן</span>
-        <span id="signalsPill" class="pill">טוען רמזורים…</span>
-      </div>
+<div class="wrap">
+  <div class="card">
+    <button id="btnAuto" class="big">▶️ Start Auto</button>
+    <div class="row" style="margin-top:10px">
+      <button id="btnExport" class="small">⬇️ Export</button>
+      <button id="btnClear" class="small stop">🗑️ מחק הכל</button>
     </div>
-
-    <div class="card">
-      <div class="kv">
-        <div>
-          <div class="k">רמזור מזוהה (ID)</div>
-          <div id="sigId" class="v">—</div>
-          <div class="muted" id="sigDist">מרחק: —</div>
-        </div>
-        <div>
-          <div class="k">טיימר המתנה</div>
-          <div id="timer" class="v">0 שנ׳</div>
-          <div class="muted" id="speedLine">מהירות: —</div>
-        </div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="row">
-        <button id="exportBtn" class="btn btn-ghost">Export JSON</button>
-        <button id="clearBtn" class="btn btn-danger">נקה מדידות</button>
-      </div>
-      <div class="muted" style="margin-top:10px">
-        המדידות נשמרות בטלפון (localStorage). Export מוריד קובץ JSON.
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="k">לוג</div>
-      <div id="log" class="log"></div>
-    </div>
+    <div class="bigNum" id="modeLine">מוכן</div>
+    <div class="muted" id="stateLine">טוען רמזורים…</div>
   </div>
 
+  <div class="card">
+    <div class="row">
+      <span class="pill">רמזור נוכחי: <b id="curSig">—</b></span>
+      <span class="pill">מרחק: <b id="curDist">—</b></span>
+      <span class="pill">מהירות: <b id="curSpeed">—</b></span>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <span class="pill">המתנה: <b id="waitTimer">00:00</b></span>
+      <span class="pill">סוג אירוע: <b id="eventType">—</b></span>
+      <span class="pill">פנייה: <b id="turnGuess">—</b></span>
+    </div>
+
+    <div class="muted" style="margin-top:8px" id="summary"></div>
+    <div class="list" id="recent"></div>
+
+    <details style="margin-top:10px">
+      <summary class="muted">הצג JSON</summary>
+      <textarea id="jsonOut" readonly></textarea>
+    </details>
+  </div>
+</div>
+
 <script>
-/* =========================
-   Utilities
-========================= */
-const $ = (id) => document.getElementById(id);
+/* ===== Config ===== */
+const SIGNALS_URL = "./data/signals.geojson";
 
-function nowISO() { return new Date().toISOString(); }
-function ms() { return Date.now(); }
+const DB_KEY = "greenroute_auto_v2";
 
-function toRad(d){ return d * Math.PI/180; }
-function haversineMeters(lat1, lon1, lat2, lon2) {
-  const R = 6371e3;
-  const φ1 = toRad(lat1), φ2 = toRad(lat2);
-  const Δφ = toRad(lat2-lat1);
-  const Δλ = toRad(lon2-lon1);
-  const a = Math.sin(Δφ/2)**2 + Math.cos(φ1)*Math.cos(φ2)*Math.sin(Δλ/2)**2;
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-  return R * c;
+/** Detection tuning **/
+const APPROACH_RADIUS_M = 80;     // מתחילים “חלון רמזור” ~5 שניות מראש
+const MATCH_RADIUS_M = 40;        // מצמידים לאותו רמזור
+const COOLDOWN_SAME_SIGNAL_MS = 25000; // לא לשמור שוב לאותו רמזור מהר מדי
+
+/** Movement thresholds **/
+const STOP_KMH = 2;               // מתחת לזה נחשב “עצירה”
+const PASS_KMH = 10;              // אם עבר מעל זה בלי עצירה => PASS (ירוק)
+const PASS_CONFIRM_MS = 1500;     // יציב 1.5 שנ’
+const STOP_CONFIRM_MS = 1000;     // יציב 1 שנ’
+const EXIT_KMH = 10;              // יציאה/סיום למדידה
+const EXIT_CONFIRM_MS = 2000;     // יציב 2 שנ’
+
+/** Turn estimation **/
+const TURN_FOLLOW_MS = 7000;      // מעקב אחרי מעבר/יציאה כדי לנחש פנייה
+const TURN_STRAIGHT_DEG = 25;     // |delta| < 25 => ישר
+const TURN_RIGHT_MIN = 25, TURN_RIGHT_MAX = 120;
+const TURN_LEFT_MIN = -120, TURN_LEFT_MAX = -25;
+
+/* ===== UI ===== */
+const el = (id) => document.getElementById(id);
+const gpsStatus = el("gpsStatus");
+const gpsPos = el("gpsPos");
+const btnAuto = el("btnAuto");
+const btnExport = el("btnExport");
+const btnClear = el("btnClear");
+const modeLine = el("modeLine");
+const stateLine = el("stateLine");
+const curSig = el("curSig");
+const curDist = el("curDist");
+const curSpeed = el("curSpeed");
+const waitTimer = el("waitTimer");
+const eventType = el("eventType");
+const turnGuess = el("turnGuess");
+const summary = el("summary");
+const recent = el("recent");
+const jsonOut = el("jsonOut");
+
+/* ===== Helpers ===== */
+function fmtTime(sec){
+  const m = Math.floor(sec/60), s = sec%60;
+  return String(m).padStart(2,"0")+":"+String(s).padStart(2,"0");
 }
-
+function toRad(x){ return x*Math.PI/180; }
+function havM(aLat,aLng,bLat,bLng){
+  const R = 6371000;
+  const dLat = toRad(bLat-aLat), dLon = toRad(bLng-aLng);
+  const s1 = Math.sin(dLat/2), s2 = Math.sin(dLon/2);
+  const aa = s1*s1 + Math.cos(toRad(aLat))*Math.cos(toRad(bLat))*s2*s2;
+  return 2*R*Math.asin(Math.min(1,Math.sqrt(aa)));
+}
 function clampAngle180(a){
-  // convert any angle to (-180..180)
   let x = ((a % 360) + 360) % 360;
   if (x > 180) x -= 360;
   return x;
 }
-
-function median(arr){
-  if (!arr.length) return null;
-  const s = [...arr].sort((a,b)=>a-b);
-  const mid = Math.floor(s.length/2);
-  return (s.length % 2) ? s[mid] : (s[mid-1]+s[mid])/2;
-}
-
 function avgCircularDegrees(degs){
-  // average of angles
-  if (!degs.length) return null;
+  const arr = degs.filter(v => Number.isFinite(v));
+  if (!arr.length) return null;
   let x=0,y=0;
-  for (const d of degs){
+  for(const d of arr){
     const r = toRad(d);
-    x += Math.cos(r);
-    y += Math.sin(r);
+    x += Math.cos(r); y += Math.sin(r);
   }
   const ang = Math.atan2(y,x) * 180/Math.PI;
   return ((ang % 360) + 360) % 360;
 }
+function vibrate(p){ try{ if(navigator.vibrate) navigator.vibrate(p); }catch{} }
 
-function log(msg){
-  const line = `[${new Date().toLocaleTimeString()}] ${msg}\n`;
-  $("log").textContent = line + $("log").textContent;
-}
-
-/* =========================
-   Data store
-========================= */
-const STORE_KEY = "greenroute_measurements_v1";
-function loadStore(){
-  try { return JSON.parse(localStorage.getItem(STORE_KEY) || "[]"); }
-  catch { return []; }
-}
-function saveStore(arr){
-  localStorage.setItem(STORE_KEY, JSON.stringify(arr));
-}
-
-/* =========================
-   Signals loading
-========================= */
-let signals = []; // {id, lon, lat}
-async function loadSignals(){
+/* ===== DB ===== */
+function loadDB(){
   try{
-    const res = await fetch("./data/signals.geojson", { cache: "no-store" });
-    if(!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    const feats = (data && data.features) ? data.features : [];
-    signals = feats
-      .filter(f => f?.geometry?.type === "Point" && Array.isArray(f.geometry.coordinates))
-      .map(f => {
-        const [lon, lat] = f.geometry.coordinates;
-        const sid =
-          f.id ||
-          f?.properties?.["@id"] ||
-          f?.properties?.id ||
-          f?.properties?.osm_id ||
-          f?.properties?.ref ||
-          "unknown";
-        return { id: String(sid), lon: Number(lon), lat: Number(lat) };
-      })
-      .filter(s => Number.isFinite(s.lat) && Number.isFinite(s.lon));
-    $("signalsPill").textContent = `רמזורים נטענו: ${signals.length}`;
-    log(`Signals loaded: ${signals.length}`);
-  }catch(e){
-    $("signalsPill").textContent = "שגיאה בטעינת רמזורים";
-    log(`ERROR loading signals: ${e.message}`);
-  }
+    const raw = JSON.parse(localStorage.getItem(DB_KEY) || "{}");
+    return { events: Array.isArray(raw.events) ? raw.events : [] };
+  }catch{ return { events: [] }; }
+}
+function saveDB(db){ localStorage.setItem(DB_KEY, JSON.stringify(db)); }
+
+/* ===== Signals ===== */
+let SIGNALS = []; // [{id,lat,lng}]
+async function loadSignals(){
+  stateLine.textContent = "טוען רמזורים מהדאטה…";
+  const res = await fetch(SIGNALS_URL, { cache: "no-store" });
+  if (!res.ok) throw new Error("Signals HTTP " + res.status);
+  const data = await res.json();
+  const feats = Array.isArray(data.features) ? data.features : [];
+  SIGNALS = feats
+    .filter(f => f?.geometry?.type==="Point" && Array.isArray(f.geometry.coordinates))
+    .map(f => {
+      const [lon,lat] = f.geometry.coordinates;
+      const fid = f.id || f?.properties?.["@id"] || f?.properties?.id || f?.properties?.osm_id || "unknown";
+      return { id: String(fid), lat: Number(lat), lng: Number(lon) };
+    })
+    .filter(s => Number.isFinite(s.lat) && Number.isFinite(s.lng));
+  stateLine.textContent = `רמזורים נטענו: ${SIGNALS.length}`;
 }
 
-function findNearestSignal(lat, lon){
-  if(!signals.length) return null;
-  let best = null;
-  let bestD = Infinity;
-  // 916 נקודות זה קטן – ריצה ליניארית בסדר
-  for (const s of signals){
-    const d = haversineMeters(lat, lon, s.lat, s.lon);
-    if (d < bestD){
-      bestD = d;
-      best = { ...s, distM: d };
-    }
+function nearestSignal(lat,lng){
+  let best=null, bestD=Infinity;
+  for(const s of SIGNALS){
+    const d = havM(lat,lng,s.lat,s.lng);
+    if (d<bestD){ bestD=d; best=s; }
   }
-  return best;
+  if (!best) return null;
+  return { ...best, distM: bestD };
 }
 
-/* =========================
-   Geolocation helpers
-========================= */
+/* ===== GPS watcher ===== */
 let watchId = null;
+let lastFix = null; // {lat,lng,acc,speedMps,heading,ts}
+let autoEnabled = false;
 
-let lastPos = null; // {lat, lon, t, speedMps?, heading?}
-function computeSpeedMps(prev, cur){
-  const dt = (cur.t - prev.t) / 1000;
-  if (dt <= 0) return null;
-  const d = haversineMeters(prev.lat, prev.lon, cur.lat, cur.lon);
-  return d / dt;
+function updateGpsUI(){
+  if(!lastFix){
+    gpsStatus.textContent = "לא פעיל";
+    gpsPos.textContent = "—";
+    return;
+  }
+  gpsStatus.textContent = "פעיל";
+  const kmh = lastFix.speedMps==null ? "—" : Math.round(lastFix.speedMps*3.6);
+  gpsPos.textContent = `${lastFix.lat.toFixed(6)}, ${lastFix.lng.toFixed(6)} · ±${Math.round(lastFix.acc||0)}m · ${kmh}km/h`;
+  curSpeed.textContent = (lastFix.speedMps==null) ? "—" : `${(lastFix.speedMps*3.6).toFixed(1)} km/h`;
 }
 
-function startWatch(){
-  if (watchId !== null) return;
-  if (!("geolocation" in navigator)){
-    alert("המכשיר לא תומך GPS בדפדפן");
+function ensureWatch(){
+  if (watchId!=null) return;
+  if (!navigator.geolocation){
+    alert("אין GPS בדפדפן הזה");
     return;
   }
   watchId = navigator.geolocation.watchPosition(
-    (pos) => onPosition(pos),
-    (err) => {
-      log(`GPS ERROR: ${err.code} ${err.message}`);
-      $("statusPill").textContent = "מצב: שגיאת GPS";
-      if (err.code === 1) alert("צריך לאשר הרשאת מיקום כדי שזה יעבוד.");
+    (pos) => {
+      lastFix = {
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude,
+        acc: pos.coords.accuracy || null,
+        speedMps: Number.isFinite(pos.coords.speed) ? pos.coords.speed : null,
+        heading: Number.isFinite(pos.coords.heading) ? pos.coords.heading : null,
+        ts: pos.timestamp || Date.now()
+      };
+      updateGpsUI();
+      if (autoEnabled) autoTick();
     },
-    {
-      enableHighAccuracy: true,
-      maximumAge: 0,
-      timeout: 15000
-    }
+    () => {
+      gpsStatus.textContent = "חסום/שגיאה";
+      alert("תן הרשאת מיקום ל-Chrome והפעל GPS.");
+    },
+    { enableHighAccuracy:true, maximumAge: 0, timeout: 15000 }
   );
-  log("GPS watch started");
 }
 
-function stopWatch(){
-  if (watchId === null) return;
-  navigator.geolocation.clearWatch(watchId);
-  watchId = null;
-  lastPos = null;
-  log("GPS watch stopped");
-}
-
-function parsePos(pos){
-  const c = pos.coords;
-  const lat = c.latitude;
-  const lon = c.longitude;
-  const t = pos.timestamp ? Number(pos.timestamp) : ms();
-  const accuracy = c.accuracy ?? null;
-  const speedMps = (typeof c.speed === "number" && isFinite(c.speed)) ? c.speed : null;
-  const heading = (typeof c.heading === "number" && isFinite(c.heading)) ? c.heading : null;
-  return { lat, lon, t, accuracy, speedMps, heading };
-}
-
-/* =========================
-   Measurement session (ONE BUTTON)
-========================= */
-const SPEED_END_KMH = 10;       // סיום אוטומטי
-const SPEED_END_STABLE_MS = 2000; // יציב 2 שניות
-const TURN_FOLLOW_MS = 5000;    // מעקב קצר אחרי יציאה כדי לנחש פנייה
-const NEAR_SIGNAL_MAX_M = 80;   // אם רחוק יותר מזה – עדיין נשמור, אבל נסמן "רחוק"
-
-let session = null;
+/* ===== Auto state machine =====
+   We track one “candidate” signal window at a time.
+*/
+let active = null;
 /*
-session = {
-  startedAtMs,
-  startISO,
-  startLat, startLon, startAccuracy,
-  nearest: {id,lat,lon,distM},
-  headingBeforeArr: [],
-  endSpeedStableSinceMs: null,
-  samples: [],
-  postMoveHeadings: [],
-  finished: false
+active = {
+  signal: {id,lat,lng,distM},
+  enteredAt,
+  minSpeedKmh,
+  stopBeganAt, // when speed <= STOP_KMH stable
+  passAboveAt, // when speed >= PASS_KMH stable
+  measuring: false,
+  redStartAt,  // when stop confirmed
+  exitAboveAt, // when speed >= EXIT_KMH stable (to finish STOP)
+  headingBefore: [],
+  headingAfter: [],
+  followUntil: null,
+  lastSavedAt: 0
 }
 */
+let lastSavedSignalAt = new Map(); // signalId -> timestamp
 
-function setMainButtonIdle(){
-  $("mainBtn").textContent = "התחל מדידה";
-  $("mainBtn").classList.remove("btn-danger");
-  $("mainBtn").classList.add("btn-primary");
-  $("statusPill").textContent = "מצב: מוכן";
-}
-function setMainButtonRunning(){
-  $("mainBtn").textContent = "מודד… (לחיצה כדי לבטל)";
-  $("mainBtn").classList.remove("btn-primary");
-  $("mainBtn").classList.add("btn-danger");
-  $("statusPill").textContent = "מצב: מודד";
+function resetActive(){
+  active = null;
+  curSig.textContent = "—";
+  curDist.textContent = "—";
+  waitTimer.textContent = "00:00";
+  eventType.textContent = "—";
+  turnGuess.textContent = "—";
 }
 
-function resetUIFields(){
-  $("sigId").textContent = "—";
-  $("sigDist").textContent = "מרחק: —";
-  $("timer").textContent = "0 שנ׳";
-  $("speedLine").textContent = "מהירות: —";
+function computeTurn(beforeArr, afterArr){
+  const before = avgCircularDegrees(beforeArr);
+  const after  = avgCircularDegrees(afterArr);
+  if (before==null || after==null) return "לא בטוח";
+  const delta = clampAngle180(after - before);
+  const abs = Math.abs(delta);
+  if (abs < TURN_STRAIGHT_DEG) return "ישר";
+  if (delta >= TURN_RIGHT_MIN && delta <= TURN_RIGHT_MAX) return "ימינה";
+  if (delta >= TURN_LEFT_MIN && delta <= TURN_LEFT_MAX) return "שמאלה";
+  return "לא בטוח";
 }
 
-function startMeasurement(){
-  if (session?.finished === false) return;
-  if (!signals.length){
-    alert("הרמזורים עדיין לא נטענו. חכה רגע ונסה שוב.");
+function saveEvent(kind, signal, waitSec, turn, extra){
+  const db = loadDB();
+  db.events.unshift({
+    createdAt: Date.now(),
+    kind, // "STOP" | "PASS"
+    waitSeconds: waitSec,
+    turn,
+    signal: signal ? { id: signal.id, lat: signal.lat, lng: signal.lng, distanceM: Math.round(signal.distM) } : null,
+    fix: lastFix ? { lat:lastFix.lat, lng:lastFix.lng, acc:lastFix.acc, speedKmh: lastFix.speedMps==null?null:lastFix.speedMps*3.6, heading:lastFix.heading } : null,
+    extra: extra || {}
+  });
+  saveDB(db);
+  render();
+}
+
+function canSaveSignal(signalId){
+  const t = Date.now();
+  const last = lastSavedSignalAt.get(signalId) || 0;
+  if (t - last < COOLDOWN_SAME_SIGNAL_MS) return false;
+  lastSavedSignalAt.set(signalId, t);
+  return true;
+}
+
+function autoTick(){
+  if (!lastFix || !SIGNALS.length) return;
+
+  const speedKmh = lastFix.speedMps==null ? null : lastFix.speedMps*3.6;
+  const nearest = nearestSignal(lastFix.lat, lastFix.lng);
+
+  // If no active window, decide if we enter one
+  if (!active){
+    if (nearest && nearest.distM <= APPROACH_RADIUS_M){
+      active = {
+        signal: nearest,
+        enteredAt: Date.now(),
+        stopBeganAt: null,
+        passAboveAt: null,
+        measuring: false,
+        redStartAt: null,
+        exitAboveAt: null,
+        headingBefore: [],
+        headingAfter: [],
+        followUntil: null
+      };
+      curSig.textContent = nearest.id;
+      curDist.textContent = `${Math.round(nearest.distM)}m`;
+      modeLine.textContent = "Auto: זיהיתי רמזור";
+      stateLine.textContent = "נכנסת לטווח רמזור — בודק עצירה/מעבר…";
+      vibrate(30);
+    }
     return;
   }
-  session = {
-    startedAtMs: ms(),
-    startISO: nowISO(),
-    startLat: null,
-    startLon: null,
-    startAccuracy: null,
-    nearest: null,
-    headingBeforeArr: [],
-    endSpeedStableSinceMs: null,
-    samples: [],
-    postMoveHeadings: [],
-    finished: false,
-    followUntilMs: null
-  };
-  resetUIFields();
-  setMainButtonRunning();
-  startWatch();
-  log("Measurement started (waiting for GPS fix...)");
-}
 
-function cancelMeasurement(){
-  if (!session || session.finished) return;
-  session.finished = true;
-  setMainButtonIdle();
-  resetUIFields();
-  log("Measurement cancelled");
-  // נשאיר GPS פועל? לא. נחסוך סוללה.
-  stopWatch();
-  session = null;
-}
-
-function finishMeasurement(reason){
-  if (!session || session.finished) return;
-  session.finished = true;
-
-  const endedAtMs = ms();
-  const waitSeconds = Math.max(0, Math.round((endedAtMs - session.startedAtMs)/1000));
-
-  // Headings
-  const headingBefore = avgCircularDegrees(session.headingBeforeArr.filter(x => x != null));
-  const headingAfter  = avgCircularDegrees(session.postMoveHeadings.filter(x => x != null));
-
-  let turn = "unknown";
-  if (headingBefore != null && headingAfter != null){
-    const delta = clampAngle180(headingAfter - headingBefore);
-    const abs = Math.abs(delta);
-    if (abs < 25) turn = "straight";
-    else if (delta >= 25 && delta <= 120) turn = "right";
-    else if (delta <= -25 && delta >= -120) turn = "left";
-    else turn = "uncertain";
-  }
-
-  const nearest = session.nearest;
-  const record = {
-    createdAtISO: nowISO(),
-    startISO: session.startISO,
-    reason,
-    waitSeconds,
-    signal: nearest ? {
-      id: nearest.id,
-      lat: nearest.lat,
-      lon: nearest.lon,
-      distanceM: Math.round(nearest.distM)
-    } : null,
-    start: {
-      lat: session.startLat,
-      lon: session.startLon,
-      accuracyM: session.startAccuracy
-    },
-    heading: {
-      beforeDeg: headingBefore,
-      afterDeg: headingAfter,
-      turn
-    },
-    notes: {
-      nearSignalMaxM: NEAR_SIGNAL_MAX_M,
-      speedEndKmh: SPEED_END_KMH
-    }
-  };
-
-  const store = loadStore();
-  store.unshift(record);
-  saveStore(store);
-
-  log(`Saved: wait=${waitSeconds}s, signal=${nearest?.id || "none"}, dist=${nearest ? Math.round(nearest.distM) : "—"}m, turn=${turn}`);
-  setMainButtonIdle();
-
-  // עדכון UI מסכם
-  $("timer").textContent = `${waitSeconds} שנ׳ (נשמר)`;
+  // Update active signal distance (keep matching same one if still close; else update to nearest if within MATCH radius)
   if (nearest){
-    $("sigId").textContent = nearest.id;
-    $("sigDist").textContent = `מרחק: ${Math.round(nearest.distM)} מטר`;
+    // If the nearest changed but still very close, allow update to keep right id
+    if (nearest.distM <= MATCH_RADIUS_M){
+      active.signal = nearest;
+      curSig.textContent = nearest.id;
+      curDist.textContent = `${Math.round(nearest.distM)}m`;
+    } else {
+      // still show previous active distance if possible
+      const d = havM(lastFix.lat,lastFix.lng, active.signal.lat,active.signal.lng);
+      active.signal.distM = d;
+      curDist.textContent = `${Math.round(d)}m`;
+    }
+  }
+
+  // Collect headings
+  if (Number.isFinite(lastFix.heading)){
+    // before headings: when slow/approaching
+    if (speedKmh==null || speedKmh < 8){
+      active.headingBefore.push(lastFix.heading);
+      if (active.headingBefore.length>25) active.headingBefore.shift();
+    }
+    // after headings: during follow window
+    if (active.followUntil && Date.now() <= active.followUntil){
+      active.headingAfter.push(lastFix.heading);
+      if (active.headingAfter.length>40) active.headingAfter.shift();
+    }
+  }
+
+  // If we moved far away from active signal, close window (but if not saved anything, maybe it was a miss)
+  if (active.signal.distM > (APPROACH_RADIUS_M + 60)){
+    modeLine.textContent = "Auto: יצאתי מהטווח";
+    stateLine.textContent = "חוזר לחיפוש רמזור…";
+    resetActive();
+    return;
+  }
+
+  // 1) Detect STOP (red): speed <= STOP_KMH stable
+  if (speedKmh != null && speedKmh <= STOP_KMH){
+    if (!active.stopBeganAt) active.stopBeganAt = Date.now();
+    if (Date.now() - active.stopBeganAt >= STOP_CONFIRM_MS && !active.measuring){
+      active.measuring = true;
+      active.redStartAt = Date.now();
+      active.exitAboveAt = null;
+      active.followUntil = null;
+      eventType.textContent = "STOP (מודד)";
+      modeLine.textContent = "Auto: עצרת — מודד";
+      stateLine.textContent = "מודד זמן המתנה עד שתתחיל לזוז…";
+      vibrate(50);
+    }
   } else {
-    $("sigId").textContent = "לא נמצא רמזור";
-    $("sigDist").textContent = "מרחק: —";
+    active.stopBeganAt = null;
   }
 
-  // אחרי שמירה — מכבים GPS לחיסכון
-  stopWatch();
-  // משאירים session לסיכום רגע ואז מאפסים
-  setTimeout(() => { session = null; }, 2000);
-}
-
-/* =========================
-   GPS stream processing
-========================= */
-function onPosition(pos){
-  const cur = parsePos(pos);
-
-  // compute speed if missing
-  let speedMps = cur.speedMps;
-  if (speedMps == null && lastPos){
-    const computed = computeSpeedMps(lastPos, {lat: cur.lat, lon: cur.lon, t: cur.t});
-    if (computed != null && isFinite(computed)) speedMps = computed;
+  // Timer UI when measuring
+  if (active.measuring && active.redStartAt){
+    const sec = Math.max(0, Math.round((Date.now()-active.redStartAt)/1000));
+    waitTimer.textContent = fmtTime(sec);
+  } else {
+    waitTimer.textContent = "00:00";
   }
-  const speedKmh = (speedMps != null) ? (speedMps * 3.6) : null;
 
-  // update lastPos
-  lastPos = { lat: cur.lat, lon: cur.lon, t: cur.t, speedMps, heading: cur.heading };
+  // 2) If measuring (STOP), finish when speed >= EXIT_KMH stable
+  if (active.measuring){
+    if (speedKmh != null && speedKmh >= EXIT_KMH){
+      if (!active.exitAboveAt) active.exitAboveAt = Date.now();
+      // set follow window for turn estimation
+      if (!active.followUntil) active.followUntil = Date.now() + TURN_FOLLOW_MS;
 
-  // UI speed line
-  $("speedLine").textContent = `מהירות: ${speedKmh == null ? "—" : speedKmh.toFixed(1) + " קמ״ש"} | דיוק: ${cur.accuracy ? Math.round(cur.accuracy) + "m" : "—"}`;
+      if (Date.now() - active.exitAboveAt >= EXIT_CONFIRM_MS){
+        // Finish STOP event
+        const waitSec = Math.max(0, Math.round((Date.now()-active.redStartAt)/1000));
+        const turn = computeTurn(active.headingBefore, active.headingAfter);
+        turnGuess.textContent = turn;
 
-  // If no session running, nothing else
-  if (!session || session.finished) return;
+        if (active.signal?.id && canSaveSignal(active.signal.id)){
+          saveEvent("STOP", active.signal, waitSec, turn, { approachRadiusM: APPROACH_RADIUS_M });
+          modeLine.textContent = "Auto: נשמר STOP ✅";
+          stateLine.textContent = `נשמר זמן המתנה ${waitSec}s`;
+          vibrate([80,50,80]);
+        } else {
+          modeLine.textContent = "Auto: דילגתי (כפילות)";
+          stateLine.textContent = "אותו רמזור נשמר לאחרונה — לא שומר שוב";
+        }
 
-  // First GPS fix for session
-  if (session.startLat == null){
-    session.startLat = cur.lat;
-    session.startLon = cur.lon;
-    session.startAccuracy = cur.accuracy ?? null;
-
-    // Find nearest signal at start
-    const nearest = findNearestSignal(cur.lat, cur.lon);
-    session.nearest = nearest;
-
-    if (nearest){
-      $("sigId").textContent = nearest.id;
-      $("sigDist").textContent = `מרחק: ${Math.round(nearest.distM)} מטר`;
-      if (nearest.distM > NEAR_SIGNAL_MAX_M){
-        log(`Nearest signal is far (${Math.round(nearest.distM)}m). Still measuring.`);
-      } else {
-        log(`Nearest signal: ${nearest.id} (${Math.round(nearest.distM)}m)`);
+        // close window
+        resetActive();
+        return;
       }
     } else {
-      $("sigId").textContent = "לא נמצא רמזור";
-      $("sigDist").textContent = "מרחק: —";
-      log("No signals available for nearest lookup.");
+      active.exitAboveAt = null;
     }
+    return;
   }
 
-  // Timer update
-  const elapsedS = Math.max(0, Math.round((ms() - session.startedAtMs)/1000));
-  $("timer").textContent = `${elapsedS} שנ׳`;
+  // 3) If NOT measuring: detect PASS (green): stay above PASS_KMH while within signal window, without dropping to STOP
+  if (speedKmh != null && speedKmh >= PASS_KMH){
+    if (!active.passAboveAt) active.passAboveAt = Date.now();
+    // set follow window for turn estimation
+    if (!active.followUntil) active.followUntil = Date.now() + TURN_FOLLOW_MS;
 
-  // Heading before: collect when speed is low (standing/creeping) or unknown
-  if (cur.heading != null && (speedKmh == null || speedKmh < 8)){
-    session.headingBeforeArr.push(cur.heading);
-    if (session.headingBeforeArr.length > 25) session.headingBeforeArr.shift();
-  }
+    if (Date.now() - active.passAboveAt >= PASS_CONFIRM_MS){
+      const turn = computeTurn(active.headingBefore, active.headingAfter);
+      turnGuess.textContent = turn;
 
-  // Check finish condition: speed > SPEED_END_KMH stable for ~2s
-  if (speedKmh != null && speedKmh >= SPEED_END_KMH){
-    if (session.endSpeedStableSinceMs == null){
-      session.endSpeedStableSinceMs = ms();
-    }
-    const stableFor = ms() - session.endSpeedStableSinceMs;
+      if (active.signal?.id && canSaveSignal(active.signal.id)){
+        saveEvent("PASS", active.signal, 0, turn, { approachRadiusM: APPROACH_RADIUS_M });
+        eventType.textContent = "PASS (0s)";
+        modeLine.textContent = "Auto: נשמר PASS ✅";
+        stateLine.textContent = "עברתי בלי עצירה (ירוק)";
+        vibrate(30);
+      } else {
+        modeLine.textContent = "Auto: דילגתי (כפילות)";
+        stateLine.textContent = "אותו רמזור נשמר לאחרונה — לא שומר שוב";
+      }
 
-    // after movement starts, start follow-up window for turn detection
-    if (session.followUntilMs == null){
-      session.followUntilMs = ms() + TURN_FOLLOW_MS;
-      log("Movement detected, collecting headings for turn...");
-    }
-
-    // collect post-move headings during follow-up window
-    if (cur.heading != null && session.followUntilMs != null && ms() <= session.followUntilMs){
-      session.postMoveHeadings.push(cur.heading);
-      if (session.postMoveHeadings.length > 40) session.postMoveHeadings.shift();
-    }
-
-    if (stableFor >= SPEED_END_STABLE_MS){
-      // Ensure we have at least some post headings, but don't block forever
-      finishMeasurement("speed_threshold_reached");
+      // close window shortly after pass
+      resetActive();
+      return;
     }
   } else {
-    // if below threshold, reset stable timer
-    session.endSpeedStableSinceMs = null;
-
-    // also collect post headings only after movement window started
-    if (session.followUntilMs != null && cur.heading != null && ms() <= session.followUntilMs){
-      session.postMoveHeadings.push(cur.heading);
-      if (session.postMoveHeadings.length > 40) session.postMoveHeadings.shift();
-    }
-  }
-
-  // If follow-up window passed and we haven't finished yet (rare), finish anyway after window
-  if (session.followUntilMs != null && ms() > session.followUntilMs && !session.finished){
-    finishMeasurement("follow_window_elapsed");
+    active.passAboveAt = null;
   }
 }
 
-/* =========================
-   UI events
-========================= */
-$("mainBtn").addEventListener("click", () => {
-  if (!session) startMeasurement();
-  else if (session && session.finished === false) cancelMeasurement();
-});
+/* ===== Render ===== */
+function render(){
+  const db = loadDB();
+  jsonOut.value = JSON.stringify(db, null, 2);
+  const n = db.events.length;
+  const stops = db.events.filter(e=>e.kind==="STOP").length;
+  const passes = db.events.filter(e=>e.kind==="PASS").length;
+  const avgStop = stops ? (db.events.filter(e=>e.kind==="STOP").reduce((s,e)=>s+e.waitSeconds,0)/stops) : 0;
+  summary.textContent = n
+    ? `סה״כ: ${n} אירועים · STOP: ${stops} (ממוצע ${avgStop.toFixed(1)}s) · PASS: ${passes}`
+    : "עדיין אין נתונים. לחץ Start Auto ותתחיל לנסוע.";
 
-$("exportBtn").addEventListener("click", () => {
-  const data = loadStore();
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = `traffic-lights-log-${new Date().toISOString().slice(0,19).replace(/[:T]/g,"-")}.json`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-  log(`Exported ${data.length} records`);
-});
+  recent.innerHTML = "";
+  const items = db.events.slice(0, 12);
+  for(const e of items){
+    const d = new Date(e.createdAt).toLocaleString("he-IL",{hour:"2-digit",minute:"2-digit",day:"2-digit",month:"2-digit"});
+    const sig = e.signal ? `${e.signal.id} · ~${e.signal.distanceM}m` : "—";
+    const div = document.createElement("div");
+    div.className = "item";
+    div.innerHTML = `
+      <div><b>${d}</b> · <span class="mono">${e.kind}</span> · <span class="mono">${e.waitSeconds}s</span> · <span>${e.turn||"—"}</span></div>
+      <div class="muted mono">${sig}</div>
+    `;
+    recent.appendChild(div);
+  }
+}
 
-$("clearBtn").addEventListener("click", () => {
-  if (!confirm("למחוק את כל המדידות מהטלפון?")) return;
-  saveStore([]);
-  log("Cleared all records");
-});
-
-window.addEventListener("visibilitychange", () => {
-  // אם עברת לאפליקציה אחרת בזמן מדידה — נבטל כדי שלא יהיה בלגן
-  if (document.hidden && session && session.finished === false){
-    log("Page hidden → cancelling measurement for safety");
-    cancelMeasurement();
+/* ===== Buttons ===== */
+btnAuto.addEventListener("click", async () => {
+  if (!autoEnabled){
+    try{
+      btnAuto.disabled = true;
+      if (!SIGNALS.length) await loadSignals();
+      ensureWatch();
+      autoEnabled = true;
+      btnAuto.textContent = "⏹ Stop Auto";
+      btnAuto.classList.add("active");
+      btnAuto.classList.add("stop");
+      modeLine.textContent = "Auto פעיל";
+      stateLine.textContent = "מחפש רמזור בטווח…";
+      vibrate([30,30,30]);
+    }catch(e){
+      alert("שגיאה בטעינת רמזורים: " + e.message);
+      stateLine.textContent = "שגיאה בטעינת רמזורים";
+    }finally{
+      btnAuto.disabled = false;
+    }
+  } else {
+    autoEnabled = false;
+    btnAuto.textContent = "▶️ Start Auto";
+    btnAuto.classList.remove("active");
+    btnAuto.classList.remove("stop");
+    modeLine.textContent = "מוכן";
+    stateLine.textContent = "Auto כבוי";
+    resetActive();
+    // חיסכון סוללה:
+    if (watchId!=null){
+      navigator.geolocation.clearWatch(watchId);
+      watchId = null;
+      lastFix = null;
+      updateGpsUI();
+    }
   }
 });
 
-/* =========================
-   Init
-========================= */
-resetUIFields();
-setMainButtonIdle();
-loadSignals();
-log("App ready. Tip: open via https (GitHub Pages) so GPS works.");
-</script>
+btnExport.addEventListener("click", () => {
+  const db = loadDB();
+  const payload = {
+    meta: {
+      exportedAt: Date.now(),
+      signalsCount: SIGNALS.length,
+      approachRadiusM: APPROACH_RADIUS_M,
+      matchRadiusM: MATCH_RADIUS_M
+    },
+    ...db
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type:"application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `greenroute-auto-${Date.now()}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+});
 
+btnClear.addEventListener("click", () => {
+  if (!confirm("למחוק את כל המדידות מהטלפון?")) return;
+  localStorage.removeItem(DB_KEY);
+  render();
+});
+
+/* ===== Init ===== */
+render();
+loadSignals().catch(()=>{});
+updateGpsUI();
+</script>
 </body>
 </html>
